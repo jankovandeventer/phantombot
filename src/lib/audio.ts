@@ -20,6 +20,8 @@ import {
 import { getPersonaSecret } from "./vaultSecrets.ts";
 import { timeoutSignal } from "./fetchTimeout.ts";
 import { detectLanguage } from "./languageGate.ts";
+import { existsSync } from "node:fs";
+import { win32 } from "node:path";
 
 /**
  * Hard ceiling for TTS/STT provider calls. Voice replies are short (the
@@ -114,12 +116,13 @@ export async function sttSupport(config: Config): Promise<AudioSupport> {
  * Diagnose whether the configured provider can synthesize TTS. Async: see sttSupport.
  *
  * With `[voice] tts = "robot"` replies need no key — only espeak-ng and
- * ffmpeg on PATH. Provider `none` still answers `provider_none`: the robot
- * override rides on a provider that hears, never stands in for one.
+ * ffmpeg (see `resolveRobotBinary`). Provider `none` still answers
+ * `provider_none`: the robot override rides on a provider that hears, never
+ * stands in for one.
  */
 export async function ttsSupport(
   config: Config,
-  which: (bin: string) => string | null = Bun.which,
+  resolve: (bin: string) => string | null = resolveRobotBinary,
 ): Promise<AudioSupport> {
   const provider = config.voice.provider;
   if (provider === "none") {
@@ -130,7 +133,7 @@ export async function ttsSupport(
   }
   if (config.voice.tts === "robot") {
     for (const binary of ROBOT_BINARIES) {
-      if (!which(binary)) return { ok: false, reason: "robot_missing", provider, binary };
+      if (!resolve(binary)) return { ok: false, reason: "robot_missing", provider, binary };
     }
     return { ok: true };
   }
@@ -216,8 +219,33 @@ export async function transcribe(
 // Robot voice (local espeak-ng → ffmpeg → OGG-Opus; no network, no key)
 // ---------------------------------------------------------------------------
 
-/** Binaries the robot voice needs on PATH, in the order they run. */
+/** Binaries the robot voice needs, in the order they run. */
 export const ROBOT_BINARIES = ["espeak-ng", "ffmpeg"] as const;
+
+/**
+ * Where a robot binary lives: PATH first. On Windows, espeak-ng also falls back
+ * to the eSpeak NG installer's own folder — MSIs since 1.51 (2022) add it to
+ * the system PATH, but older ones (still linked from the upstream guide) do
+ * not, and a phantom started before the install keeps its old PATH anyway.
+ */
+export function resolveRobotBinary(
+  bin: string,
+  which: (bin: string) => string | null = Bun.which,
+  platform: string = process.platform,
+  env: Record<string, string | undefined> = process.env,
+  exists: (path: string) => boolean = existsSync,
+): string | null {
+  const found = which(bin);
+  if (found) return found;
+  if (platform === "win32" && bin === "espeak-ng") {
+    for (const base of [env.ProgramFiles, env["ProgramFiles(x86)"]]) {
+      if (!base) continue;
+      const candidate = win32.join(base, "eSpeak NG", "espeak-ng.exe");
+      if (exists(candidate)) return candidate;
+    }
+  }
+  return null;
+}
 
 export interface RobotRunResult {
   exitCode: number;
@@ -229,7 +257,12 @@ export interface RobotRunResult {
 export type RobotRunner = (cmd: string[], stdin: Uint8Array) => Promise<RobotRunResult>;
 
 async function runRobotCommand(cmd: string[], stdin: Uint8Array): Promise<RobotRunResult> {
-  const proc = Bun.spawn(cmd, { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+  const [bin, ...args] = cmd;
+  const proc = Bun.spawn([resolveRobotBinary(bin!) ?? bin!, ...args], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   // Same bound as a provider call: a wedged encoder must not stall the
   // chat's serial chain.
   const timer = setTimeout(() => proc.kill("SIGKILL"), AUDIO_FETCH_TIMEOUT_MS);

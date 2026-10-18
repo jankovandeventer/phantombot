@@ -6,6 +6,7 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  resolveRobotBinary,
   type RobotRunner,
   robotEspeakVoice,
   sttSupport,
@@ -144,5 +145,30 @@ describe("robot voice — support diagnostics", () => {
     delete process.env.PHANTOMBOT_TEST_ROBOT_KEY;
     const s = await sttSupport(robotConfig());
     expect(s).toMatchObject({ ok: false, reason: "key_missing" });
+  });
+});
+
+describe("robot voice — finding the binaries", () => {
+  const none = () => null;
+  const programFiles = { ProgramFiles: "C:\\Program Files" };
+  const installed = "C:\\Program Files\\eSpeak NG\\espeak-ng.exe";
+
+  test("PATH wins on every platform", () => {
+    expect(resolveRobotBinary("espeak-ng", () => "/usr/bin/espeak-ng", "win32", programFiles, () => true))
+      .toBe("/usr/bin/espeak-ng");
+  });
+
+  test("Windows falls back to the eSpeak NG install folder", () => {
+    expect(resolveRobotBinary("espeak-ng", none, "win32", programFiles, (p) => p === installed))
+      .toBe(installed);
+  });
+
+  test("no fallback when the install folder is empty, or off Windows", () => {
+    expect(resolveRobotBinary("espeak-ng", none, "win32", programFiles, () => false)).toBeNull();
+    expect(resolveRobotBinary("espeak-ng", none, "linux", programFiles, () => true)).toBeNull();
+  });
+
+  test("ffmpeg is never guessed — it must be on PATH", () => {
+    expect(resolveRobotBinary("ffmpeg", none, "win32", programFiles, () => true)).toBeNull();
   });
 });

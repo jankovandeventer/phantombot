@@ -35,7 +35,9 @@ voice = "female"                 # or "male"
 Each reply is spoken in its own language when espeak-ng has a voice for it
 (`nl+f3`, `de+m3`, …), otherwise in English. The robot needs `espeak-ng` and
 `ffmpeg` (with libopus) on `PATH` — on Debian/Ubuntu `sudo apt install espeak-ng
-ffmpeg` (espeak-ng is in `universe`). Replies arrive as OGG-Opus voice notes.
+ffmpeg` (espeak-ng is in `universe`); on Windows see
+[Run Phantombot on Windows](../operations/windows.md#robot-voice-on-windows).
+Replies arrive as OGG-Opus voice notes.
 With provider `none` the robot setting is ignored: voice stays off.
 
 Reply format mirrors the latest user message by default: voice in receives
